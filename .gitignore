@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.env.local
+auth_list.json
+result.json
+dead_proxies.json
+data/
+*.log
+.venv/
+venv/
+.idea/
+.vscode/
+.DS_Store
