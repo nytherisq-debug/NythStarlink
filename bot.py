@@ -17,7 +17,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ==================== CONFIG (Environment Variables) ====================
+# ==================== CONFIG ====================
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 ADMIN_ID = os.environ.get("ADMIN_ID", "")
 ADMIN_CONTACT = os.environ.get("ADMIN_CONTACT", "@username")
@@ -87,13 +87,12 @@ auth_lock = asyncio.Lock()
 result_lock = asyncio.Lock()
 SUCCESS_CODE = asyncio.Queue()
 
-# Auth cache
 _auth_cache = {}
 _auth_cache_time = 0
 AUTH_CACHE_TTL = 30
 
 
-# ==================== WEB SERVER (Railway Health Check) ====================
+# ==================== WEB SERVER ====================
 async def handle_health(request):
     return web.Response(text="Bot is awake and running 24/7!")
 
@@ -114,7 +113,7 @@ async def web_server():
     logger.info(f"🌐 Web server started on port {port}")
 
 
-# ==================== PROXY MANAGEMENT ====================
+# ==================== PROXY ====================
 async def get_random_proxy_connector():
     global PROXY_ENABLED
     if not PROXY_ENABLED:
@@ -140,7 +139,7 @@ async def get_random_proxy_connector():
         return aiohttp.TCPConnector(ssl=True), None
 
 
-# ==================== DATA PERSISTENCE ====================
+# ==================== DATA ====================
 async def save_dead_proxies():
     try:
         async with aiofiles.open(DEAD_PROXY_FILE, 'w') as f:
@@ -155,7 +154,6 @@ async def load_dead_proxies():
         async with aiofiles.open(DEAD_PROXY_FILE, 'r') as f:
             data = json.loads(await f.read())
             dead_proxies = set(data)
-            logger.info(f"📂 Loaded {len(dead_proxies)} dead proxies")
     except FileNotFoundError:
         dead_proxies = set()
     except Exception:
@@ -211,7 +209,7 @@ async def save_result():
         os.replace(tmp_file, RESULT_FILE)
 
 
-# ==================== UTILITY FUNCTIONS ====================
+# ==================== UTILS ====================
 def check_key_expiration(expiration_time):
     try:
         if isinstance(expiration_time, dict):
@@ -351,7 +349,7 @@ async def send_main_menu(message):
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"အောက်ပါ Menu မှ ရွေးချယ်ပါ။"
     )
-    await bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown", reply_markup=markup)
+    await bot.send_message(message.chat.id, welcome_text, reply_markup=markup)
 
 
 async def send_admin_menu(message):
@@ -364,9 +362,9 @@ async def send_admin_menu(message):
         types.InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")
     )
     try:
-        await bot.edit_message_text("🛠️ **Admin Panel**\n\nSelect an option:", chat_id=message.chat.id, message_id=message.message_id, parse_mode="Markdown", reply_markup=markup)
+        await bot.edit_message_text("🛠️ Admin Panel\n\nSelect an option:", chat_id=message.chat.id, message_id=message.message_id, reply_markup=markup)
     except Exception:
-        await bot.send_message(message.chat.id, "🛠️ **Admin Panel**\n\nSelect an option:", parse_mode="Markdown", reply_markup=markup)
+        await bot.send_message(message.chat.id, "🛠️ Admin Panel\n\nSelect an option:", reply_markup=markup)
 
 
 # ==================== PROXY COMMANDS ====================
@@ -394,9 +392,9 @@ async def add_proxy(message):
         async with proxy_lock:
             if new_p not in PROXIES:
                 PROXIES.append(new_p)
-        await bot.reply_to(message, f"✅ Proxy Added: `{new_p}`", parse_mode="Markdown")
+        await bot.reply_to(message, f"✅ Proxy Added: {new_p}")
     else:
-        await bot.reply_to(message, "Usage: `/addproxy socks5://user:pass@IP:PORT`", parse_mode="Markdown")
+        await bot.reply_to(message, "Usage: /addproxy socks5://user:pass@IP:PORT")
 
 
 @bot.message_handler(commands=['clearproxy'])
@@ -429,13 +427,13 @@ async def proxy_status(message):
         dead_p = len(dead_proxies)
         active_p = total_p - dead_p
         status_msg = (
-            f"🔀 **Proxy Status:** `{'ON' if PROXY_ENABLED else 'OFF'}` | "
-            f"🟢 `Active: {active_p}` | 🔴 `Dead: {dead_p}` | 📦 `Total: {total_p}`"
+            f"🔀 Proxy Status: {'ON' if PROXY_ENABLED else 'OFF'} | "
+            f"🟢 Active: {active_p} | 🔴 Dead: {dead_p} | 📦 Total: {total_p}"
         )
-    await bot.reply_to(message, status_msg, parse_mode="Markdown")
+    await bot.reply_to(message, status_msg)
 
 
-# ==================== CALLBACK HANDLER ====================
+# ==================== CALLBACK ====================
 @bot.callback_query_handler(func=lambda call: True)
 async def callback_query(call):
     data = call.data
@@ -471,9 +469,9 @@ async def callback_query(call):
             types.InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")
         )
         try:
-            await bot.edit_message_text("🎯 **Choose Scan Type**", chat_id=chat_id, message_id=message_id, parse_mode="Markdown", reply_markup=markup)
+            await bot.edit_message_text("🎯 Choose Scan Type", chat_id=chat_id, message_id=message_id, reply_markup=markup)
         except Exception:
-            await bot.send_message(chat_id, "🎯 **Choose Scan Type**", parse_mode="Markdown", reply_markup=markup)
+            await bot.send_message(chat_id, "🎯 Choose Scan Type", reply_markup=markup)
         await bot.answer_callback_query(call.id)
         return
 
@@ -490,9 +488,9 @@ async def callback_query(call):
 
     elif data == "input_url":
         try:
-            await bot.edit_message_text("📝 **Please send your Session URL**\n\n(Example: `/input https://portal-as.ruijienetworks.com/api/...`)", chat_id=chat_id, message_id=message_id, parse_mode="Markdown")
+            await bot.edit_message_text("📝 Please send your Session URL\n\nExample: /input https://portal-as.ruijienetworks.com/api/...", chat_id=chat_id, message_id=message_id)
         except Exception:
-            await bot.send_message(chat_id, "📝 **Please send your Session URL**\n\n(Example: `/input https://...`)", parse_mode="Markdown")
+            await bot.send_message(chat_id, "📝 Please send your Session URL\n\nExample: /input https://portal-as.ruijienetworks.com/api/...")
         await bot.answer_callback_query(call.id)
         return
 
@@ -518,17 +516,17 @@ async def callback_query(call):
 
     elif data == "genkey_menu":
         try:
-            await bot.edit_message_text("📝 **To generate key:**\n\n`/genkey <plan> <user_id> <limit>`\n\nPlans: `30m`, `1h`, `1d`, `7d`, `1m`, `1y`, `unlimited`", chat_id=chat_id, message_id=message_id, parse_mode="Markdown")
+            await bot.edit_message_text("📝 To generate key:\n\n/genkey <plan> <user_id> <limit>\n\nPlans: 30m, 1h, 1d, 7d, 1m, 1y, unlimited", chat_id=chat_id, message_id=message_id)
         except Exception:
-            await bot.send_message(chat_id, "📝 Use `/genkey <plan> <user_id> <limit>`", parse_mode="Markdown")
+            await bot.send_message(chat_id, "📝 Use /genkey <plan> <user_id> <limit>")
         await bot.answer_callback_query(call.id)
         return
 
     elif data == "broadcast_menu":
         try:
-            await bot.edit_message_text("📝 **To broadcast:**\n\n`/broadcast <message>`", chat_id=chat_id, message_id=message_id, parse_mode="Markdown")
+            await bot.edit_message_text("📝 To broadcast:\n\n/broadcast <message>", chat_id=chat_id, message_id=message_id)
         except Exception:
-            await bot.send_message(chat_id, "📝 Use `/broadcast <message>`", parse_mode="Markdown")
+            await bot.send_message(chat_id, "📝 Use /broadcast <message>")
         await bot.answer_callback_query(call.id)
         return
 
@@ -561,35 +559,34 @@ async def handle_key(message):
             f"👤 NAME: {user_info['name']}\n"
             f"🆔 USER ID: {user_info['id']}\n"
             f"📛 USERNAME: @{user_info['username']}\n\n"
-            f"ကျေးဇူးပြု၍ Admin {ADMIN_CONTACT} ကို ဆက်သွယ်ပါ။",
-            parse_mode="Markdown"
+            f"ကျေးဇူးပြု၍ Admin {ADMIN_CONTACT} ကို ဆက်သွယ်ပါ။"
         )
 
 
 @bot.message_handler(commands=['help'])
 async def help_command(message):
     help_text = (
-        "🤖 **Bot Command List**\n\n"
-        "🔹 **User Commands**:\n"
-        "  `/key` – Key ထည့်ရန်\n"
-        "  `/input <session_url>` – URL ထည့်ရန်\n"
-        "  `/scan` – Scan စရန်\n"
-        "  `/stop` – Scan ရပ်ရန်\n"
-        "  `/result` – Code ကြည့်ရန်\n"
-        "  `/recheck` – Code ပြန်စစ်ရန်\n"
-        "  `/mylimit` – Limit ကြည့်ရန်\n"
-        "  `/proxyon` / `/proxyoff` – Proxy ထိန်း\n\n"
-        "🔹 **Admin Commands**:\n"
-        "  `/genkey <plan> <user_id> <limit>`\n"
-        "  `/delkey <user_id>`\n"
-        "  `/listkeys`\n"
-        "  `/status`\n"
-        "  `/broadcast <message>`\n"
-        "  `/addproxy <url>`\n"
-        "  `/clearproxy`\n"
-        "  `/proxystatus`"
+        "🤖 Bot Command List\n\n"
+        "🔹 User Commands:\n"
+        "  /key – Key ထည့်ရန်\n"
+        "  /input <session_url> – URL ထည့်ရန်\n"
+        "  /scan – Scan စရန်\n"
+        "  /stop – Scan ရပ်ရန်\n"
+        "  /result – Code ကြည့်ရန်\n"
+        "  /recheck – Code ပြန်စစ်ရန်\n"
+        "  /mylimit – Limit ကြည့်ရန်\n"
+        "  /proxyon / /proxyoff – Proxy ထိန်း\n\n"
+        "🔹 Admin Commands:\n"
+        "  /genkey <plan> <user_id> <limit>\n"
+        "  /delkey <user_id>\n"
+        "  /listkeys\n"
+        "  /status\n"
+        "  /broadcast <message>\n"
+        "  /addproxy <url>\n"
+        "  /clearproxy\n"
+        "  /proxystatus"
     )
-    await bot.reply_to(message, help_text, parse_mode="Markdown")
+    await bot.reply_to(message, help_text)
 
 
 @bot.message_handler(commands=['mylimit'])
@@ -614,13 +611,12 @@ async def mylimit(message):
             remaining_text = str(remaining)
         remaining_time = get_remaining_time(expires)
         await bot.reply_to(message,
-            f"📊 **Your Key Info**\n\n"
+            f"📊 Your Key Info\n\n"
             f"📋 Plan: {plan}\n"
             f"⏰ Remaining: {remaining_time}\n"
             f"🔢 Limit: {limit_text}\n"
             f"📊 Used: {used_count}\n"
-            f"✅ Remaining: {remaining_text}",
-            parse_mode="Markdown"
+            f"✅ Remaining: {remaining_text}"
         )
     elif chat_id == ADMIN_ID:
         await bot.reply_to(message, "♾️ You have Unlimited access (Admin)")
@@ -628,7 +624,7 @@ async def mylimit(message):
         await bot.reply_to(message, "❌ You don't have a valid key.")
 
 
-# ==================== ADMIN COMMANDS ====================
+# ==================== ADMIN ====================
 @bot.message_handler(commands=['genkey'])
 async def genkey(message):
     if str(message.chat.id) != ADMIN_ID:
@@ -809,7 +805,7 @@ async def handle_status(message):
         user_code_lines.append(f"  • {uid}: {count} codes")
 
     status_text = (
-        f"📊 **Bot Status**\n\n"
+        f"📊 Bot Status\n\n"
         f"⏱ Uptime: {hours}h {minutes}m {seconds}s\n"
         f"🔍 Active Scans: {active_scans}\n"
         f"👥 Scanning Users: {len(active_users)}\n"
@@ -819,18 +815,18 @@ async def handle_status(message):
         f"🛡️ Active Proxies: {len(PROXIES) - len(dead_proxies)}/{len(PROXIES)}"
     )
     if active_users:
-        status_text += f"\n\n🔑 **Active User IDs:**\n"
+        status_text += f"\n\n🔑 Active User IDs:\n"
         for uid in active_users:
             status_text += f"  • {uid}\n"
     if user_code_lines:
-        status_text += f"\n\n📊 **Codes Found Per User:**\n" + "\n".join(user_code_lines)
+        status_text += f"\n\n📊 Codes Found Per User:\n" + "\n".join(user_code_lines)
 
     markup = types.InlineKeyboardMarkup(row_width=1)
     markup.add(types.InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu"))
     try:
-        await bot.reply_to(message, status_text, parse_mode="Markdown", reply_markup=markup)
+        await bot.reply_to(message, status_text, reply_markup=markup)
     except Exception:
-        await bot.send_message(message.chat.id, status_text, parse_mode="Markdown", reply_markup=markup)
+        await bot.send_message(message.chat.id, status_text, reply_markup=markup)
 
 
 @bot.message_handler(commands=['result'])
@@ -893,7 +889,7 @@ async def save_rechecked_codes(chat_id_str, recheck_list):
     await save_result()
 
 
-# ==================== SESSION URL CHECK ====================
+# ==================== SESSION CHECK ====================
 async def check_session_url(session_url):
     if not session_url or "portal-as.ruijienetworks.com" not in session_url:
         return False
@@ -947,12 +943,12 @@ async def handle_input(message):
             types.InlineKeyboardButton("🛑 Stop", callback_data="stop_scan"),
             types.InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")
         )
-        await bot.send_message(message.chat.id, "╔════════════════════╗\n   ✅ **SESSION SAVED**\n╚════════════════════╝\n\nChoose a scan type below:", parse_mode="Markdown", reply_markup=markup)
+        await bot.send_message(message.chat.id, "✅ SESSION SAVED\n\nChoose a scan type below:", reply_markup=markup)
     else:
         await bot.reply_to(message, "❌ Session URL မှားနေပါသည် သို့မဟုတ် Proxy များ ချိတ်ဆက်၍မရပါ။")
 
 
-# ==================== SCAN LOGIC ====================
+# ==================== SCAN ====================
 async def trigger_scan(message, mode):
     chat_id = message.chat.id
     chat_id_str = str(chat_id)
@@ -993,9 +989,9 @@ async def trigger_scan(message, mode):
         "all6": "All Mix (6)", "all7": "All Mix (7)", "all8": "All Mix (8)", "all9": "All Mix (9)"
     }
     mode_display = mode_labels.get(mode, mode)
-    initial_text = f"🎯 **Scan Type:** {mode_display}\n━━━━━━━━━━━━━━━━━━━━━\n⏳ **Initializing Scan...**"
+    initial_text = f"🎯 Scan Type: {mode_display}\n━━━━━━━━━━━━━━━━━━━━━\n⏳ Initializing Scan..."
 
-    progress_msg = await bot.send_message(chat_id, initial_text, parse_mode="Markdown", reply_markup=markup)
+    progress_msg = await bot.send_message(chat_id, initial_text, reply_markup=markup)
     scan_id = str(uuid.uuid4())
     task = asyncio.create_task(
         run_bruteforce(mode, chat_id, user_data[chat_id]['session_url'], scan_id, message=message, progress_msg=progress_msg)
@@ -1019,7 +1015,7 @@ async def scan(message):
             types.InlineKeyboardButton("🔤 All Mix (9)", callback_data="scan_type_all9"),
             types.InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")
         )
-        await bot.send_message(message.chat.id, "🎯 **Choose Scan Type**", parse_mode="Markdown", reply_markup=markup)
+        await bot.send_message(message.chat.id, "🎯 Choose Scan Type", reply_markup=markup)
         return
     mode = args[1]
     valid_modes = {"6", "7", "8", "9", "all6", "all7", "all8", "all9"}
@@ -1123,7 +1119,7 @@ def format_progress(mode, checked, total, speed, found, retry, success_codes):
         filled = min(bar_length, int(percent / 5))
         bar = "█" * filled + "░" * (bar_length - filled)
         progress_text = (
-            f"🎯 **Scan Type:** {mode_display}\n"
+            f"🎯 Scan Type: {mode_display}\n"
             f"━━━━━━━━━━━━━━━━━━━━━\n"
             f"📦 Checked: {checked:,}/{total:,}\n"
             f"📊 Progress: {percent:.2f}%\n"
@@ -1134,7 +1130,7 @@ def format_progress(mode, checked, total, speed, found, retry, success_codes):
         )
     else:
         progress_text = (
-            f"🎯 **Scan Type:** {mode_display}\n"
+            f"🎯 Scan Type: {mode_display}\n"
             f"━━━━━━━━━━━━━━━━━━━━━\n"
             f"📦 Checked: {checked:,}\n"
             f"⚡ Speed: {speed_str}\n"
@@ -1144,12 +1140,12 @@ def format_progress(mode, checked, total, speed, found, retry, success_codes):
         )
 
     if success_codes:
-        codes_text = "\n━━━━━━━━━━━━━━━━━━━━━\n✅ **SUCCESS CODES**\n─────────────────────\n"
+        codes_text = "\n━━━━━━━━━━━━━━━━━━━━━\n✅ SUCCESS CODES\n─────────────────────\n"
         for idx, item in enumerate(success_codes, 1):
             if isinstance(item, dict):
-                codes_text += f"#{idx} 🔑 `{item.get('code', '?')}`\n   📦 {item.get('plan', 'Unknown')}\n"
+                codes_text += f"#{idx} 🔑 {item.get('code', '?')}\n   📦 {item.get('plan', 'Unknown')}\n"
             else:
-                codes_text += f"#{idx} 🔑 `{item}`\n"
+                codes_text += f"#{idx} 🔑 {item}\n"
         progress_text += codes_text
     return progress_text
 
@@ -1236,10 +1232,10 @@ async def run_bruteforce(mode, chat_id, session_url, scan_id, message=None, prog
             )
 
             try:
-                await bot.edit_message_text(text, chat_id=chat_id, message_id=progress_msg.message_id, parse_mode="Markdown", reply_markup=markup)
+                await bot.edit_message_text(text, chat_id=chat_id, message_id=progress_msg.message_id, reply_markup=markup)
             except Exception:
                 try:
-                    new_msg = await bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=markup)
+                    new_msg = await bot.send_message(chat_id, text, reply_markup=markup)
                     progress_msg.message_id = new_msg.message_id
                 except Exception as err:
                     logger.error(f"Progress Message Error: {err}")
@@ -1247,15 +1243,15 @@ async def run_bruteforce(mode, chat_id, session_url, scan_id, message=None, prog
         if progress_msg:
             success_codes = success_texts.get(chat_id, [])
             finish_text = format_progress(mode, checked, total, speed, found_count.get(chat_id, 0), retry_count.get(chat_id, 0), success_codes)
-            finish_text += "\n━━━━━━━━━━━━━━━━━━━━━\n✅ **SCAN COMPLETED!**"
+            finish_text += "\n━━━━━━━━━━━━━━━━━━━━━\n✅ SCAN COMPLETED!"
 
             markup = types.InlineKeyboardMarkup(row_width=1)
             markup.add(types.InlineKeyboardButton("🏠  Main Menu", callback_data="main_menu"))
             try:
-                await bot.edit_message_text(finish_text, chat_id=chat_id, message_id=progress_msg.message_id, parse_mode="Markdown", reply_markup=markup)
+                await bot.edit_message_text(finish_text, chat_id=chat_id, message_id=progress_msg.message_id, reply_markup=markup)
             except Exception:
                 try:
-                    await bot.send_message(chat_id, finish_text, parse_mode="Markdown", reply_markup=markup)
+                    await bot.send_message(chat_id, finish_text, reply_markup=markup)
                 except Exception as err:
                     logger.error(f"Progress Finish Message Error: {err}")
 
@@ -1495,7 +1491,7 @@ async def perform_check(session_url, code, chat_id, scan_id=None, recheck=False,
                 logger.error(f"Limited Message Error: {e}")
 
 
-# ==================== OCR / CAPTCHA ====================
+# ==================== OCR ====================
 _ocr = ddddocr.DdddOcr(show_ad=False)
 
 
@@ -1546,7 +1542,7 @@ async def Varify_Captcha(session, session_id, text):
         return None
 
 
-# ==================== POLLING & MAIN ====================
+# ==================== MAIN ====================
 async def start_polling():
     backoff = 5
     while True:
