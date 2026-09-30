@@ -14,10 +14,7 @@ ADMIN_CONTACT = os.environ.get("ADMIN_CONTACT", "@username")
 AUTH_FILE = "auth_list.json"
 RESULT_FILE = "result.json"
 
-# Paid Proxy (Username:Password ပါဝင်သော Proxy များ) သို့မဟုတ် ပုံမှန် Proxy များကို ဤနေရာတွင် ထည့်သွင်းနိုင်ပါသည်
 PROXIES = [
-    # ဥပမာ - "socks5://username:password@IP:PORT",
-    # ဥပမာ - "http://username:password@IP:PORT",
     "socks5://72.223.188.92:4145",
     "socks5://45.74.31.25:6369",
     "socks5://102.129.229.131:1081",
@@ -36,10 +33,9 @@ PROXIES = [
     "socks4://98.190.239.3:4145"
 ]
 
-# Dead proxy များကို ခေတ္တဖယ်ထုတ်ထားရန် 
 dead_proxies = set()
 proxy_lock = asyncio.Lock()
-PROXY_ENABLED = True  # Proxy on/off state
+PROXY_ENABLED = True
 
 async def get_random_proxy_connector():
     global PROXY_ENABLED
@@ -194,7 +190,7 @@ def format_time(total_minutes):
     try:
         minutes = int(total_minutes)
         if minutes < 0:
-            return "⛔ Expired"
+            return "Expired"
         if minutes == 0:
             return "0 minutes"
         days = minutes // 1440
@@ -280,11 +276,9 @@ async def send_admin_menu(message):
         types.InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")
     )
     try:
-        await bot.edit_message_text("🛠️ **Admin Panel**\n\nSelect an option:", chat_id=message.chat.id, message_id=message.message_id, parse_mode="Markdown", reply_markup=markup)
+        await bot.edit_message_text("🛠️ Admin Panel\n\nSelect an option:", chat_id=message.chat.id, message_id=message.message_id, reply_markup=markup)
     except:
-        await bot.send_message(message.chat.id, "🛠️ **Admin Panel**\n\nSelect an option:", parse_mode="Markdown", reply_markup=markup)
-
-# ==================== PROXY COMMANDS (proxyon/proxyoff for everyone) ====================
+        await bot.send_message(message.chat.id, "🛠️ Admin Panel\n\nSelect an option:", reply_markup=markup)
 
 @bot.message_handler(commands=['proxyon'])
 async def proxy_on(message):
@@ -319,9 +313,9 @@ async def add_proxy(message):
         async with proxy_lock:
             if new_p not in PROXIES:
                 PROXIES.append(new_p)
-        await bot.reply_to(message, f"✅ `Proxy Added:` `{new_p}`", parse_mode="Markdown")
+        await bot.reply_to(message, f"✅ Proxy Added: {new_p}")
     else:
-        await bot.reply_to(message, "Usage: `/addproxy socks5://user:pass@IP:PORT`", parse_mode="Markdown")
+        await bot.reply_to(message, "Usage: /addproxy socks5://user:pass@IP:PORT")
 
 @bot.message_handler(commands=['clearproxy'])
 async def clear_proxy(message):
@@ -364,14 +358,12 @@ async def proxy_status(message):
         dead_p = len(dead_proxies)
         active_p = total_p - dead_p
         status_msg = (
-            f"🔀 **Proxy Status:** `{'ON' if PROXY_ENABLED else 'OFF'}` | "
-            f"🟢 `Active: {active_p}` | "
-            f"🔴 `Dead: {dead_p}` | "
-            f"📦 `Total: {total_p}`"
+            f"🔀 Proxy Status: {'ON' if PROXY_ENABLED else 'OFF'} | "
+            f"🟢 Active: {active_p} | "
+            f"🔴 Dead: {dead_p} | "
+            f"📦 Total: {total_p}"
         )
-    await bot.reply_to(message, status_msg, parse_mode="Markdown")
-
-# ============================================================
+    await bot.reply_to(message, status_msg)
 
 @bot.callback_query_handler(func=lambda call: True)
 async def callback_query(call):
@@ -409,14 +401,13 @@ async def callback_query(call):
         )
         try:
             await bot.edit_message_text(
-                "🎯 **Choose Scan Type**\n\nSelect the type you want to use:",
+                "🎯 Choose Scan Type\n\nSelect the type you want to use:",
                 chat_id=chat_id,
                 message_id=message_id,
-                parse_mode="Markdown",
                 reply_markup=markup
             )
         except:
-            await bot.send_message(chat_id, "🎯 **Choose Scan Type**\n\nSelect the type you want to use:", parse_mode="Markdown", reply_markup=markup)
+            await bot.send_message(chat_id, "🎯 Choose Scan Type\n\nSelect the type you want to use:", reply_markup=markup)
         await bot.answer_callback_query(call.id)
         return
 
@@ -440,13 +431,12 @@ async def callback_query(call):
     elif data == "input_url":
         try:
             await bot.edit_message_text(
-                "📝 **Please send your Session URL**\n\n(Example: `/input https://portal-as.ruijienetworks.com/api/...`)",
+                "📝 Please send your Session URL\n\n(Example: /input https://portal-as.ruijienetworks.com/api/...)",
                 chat_id=chat_id,
-                message_id=message_id,
-                parse_mode="Markdown"
+                message_id=message_id
             )
         except:
-            await bot.send_message(chat_id, "📝 **Please send your Session URL**\n\n(Example: `/input https://portal-as.ruijienetworks.com/api/...`)", parse_mode="Markdown")
+            await bot.send_message(chat_id, "📝 Please send your Session URL\n\n(Example: /input https://portal-as.ruijienetworks.com/api/...)")
         await bot.answer_callback_query(call.id)
         return
 
@@ -473,26 +463,24 @@ async def callback_query(call):
     elif data == "genkey_menu":
         try:
             await bot.edit_message_text(
-                "📝 **To generate key, use:**\n\n`/genkey <plan> <user_id> <limit>`\n\nPlans: `30m`, `1h`, `1d`, `7d`, `1m`, `1y`, `unlimited`\n\nLimits: `unlimited` သို့မဟုတ် ကြိုက်သလောက် ဂဏန်း (ဥပမာ- 25, 100, 500)",
+                "📝 To generate key, use:\n\n/genkey <plan> <user_id> <limit>\n\nPlans: 30m, 1h, 1d, 7d, 1m, 1y, unlimited\n\nLimits: unlimited သို့မဟုတ် ကြိုက်သလောက် ဂဏန်း (ဥပမာ- 25, 100, 500)",
                 chat_id=chat_id,
-                message_id=message_id,
-                parse_mode="Markdown"
+                message_id=message_id
             )
         except:
-            await bot.send_message(chat_id, "📝 **To generate key, use:**\n\n`/genkey <plan> <user_id> <limit>`", parse_mode="Markdown")
+            await bot.send_message(chat_id, "📝 To generate key, use:\n\n/genkey <plan> <user_id> <limit>")
         await bot.answer_callback_query(call.id)
         return
 
     elif data == "broadcast_menu":
         try:
             await bot.edit_message_text(
-                "📝 **To broadcast, use:**\n\n`/broadcast <message>`",
+                "📝 To broadcast, use:\n\n/broadcast <message>",
                 chat_id=chat_id,
-                message_id=message_id,
-                parse_mode="Markdown"
+                message_id=message_id
             )
         except:
-            await bot.send_message(chat_id, "📝 **To broadcast, use:**\n\n`/broadcast <message>`", parse_mode="Markdown")
+            await bot.send_message(chat_id, "📝 To broadcast, use:\n\n/broadcast <message>")
         await bot.answer_callback_query(call.id)
         return
 
@@ -535,37 +523,37 @@ async def handle_key(message):
 @bot.message_handler(commands=['help'])
 async def help_command(message):
     help_text = (
-        "🤖 **Bot Command List**\n\n"
-        "🔹 **User Commands** (key required):\n"
-        "  `/key` – သင်၏ key ကို ထည့်သွင်းရန်\n"
-        "  `/input <session_url>` – Session URL ထည့်ရန်\n"
-        "  `/scan` – Code ရှာဖွေရန် (buttons ဖြင့်)\n"
-        "  `/stop` – လက်ရှိ scan ကို ရပ်တန့်ရန်\n"
-        "  `/result` – သင့်တွေ့ရှိထားသော success code များကို ကြည့်ရန်\n"
-        "  `/recheck` – သင့် success code များကို ပြန်လည်စစ်ဆေးရန်\n"
-        "  `/mylimit` – သင်၏ code limit ကို ကြည့်ရန်\n"
-        "  `/proxyon` – Proxy ဖွင့်ရန် (All users)\n"
-        "  `/proxyoff` – Proxy ပိတ်ရန် (All users)\n\n"
-        "🔹 **Admin Commands**:\n"
-        "  `/genkey <plan> <user_id> <limit>` – Key ထုတ်ပေးရန်\n"
-        "  `/delkey <user_id>` – Key ဖျက်ရန်\n"
-        "  `/listkeys` – Key စာရင်းကြည့်ရန်\n"
-        "  `/status` – Bot အခြေအနေကြည့်ရန်\n"
-        "  `/broadcast <message>` – User အားလုံးသို့ မက်ဆေ့ချ်ပို့ရန်\n"
-        "  `/addproxy <url>` – Proxy အသစ်ထည့်ရန် (Paid proxy: socks5://user:pass@ip:port)\n"
-        "  `/clearproxy` – Proxy အားလုံးဖျက်ရန်\n"
-        "  `/proxystatus` – Proxy အခြေအနေကြည့်ရန်\n\n"
-        "📌 **Scan Types**:\n"
-        "  `6` – 6 digit numbers\n"
-        "  `7` – 7 digit numbers\n"
-        "  `8` – 8 digit numbers\n"
-        "  `9` – 9 digit numbers\n"
-        "  `all6` – Alphanumeric 6 chars\n"
-        "  `all7` – Alphanumeric 7 chars\n"
-        "  `all8` – Alphanumeric 8 chars\n"
-        "  `all9` – Alphanumeric 9 chars"
+        "🤖 Bot Command List\n\n"
+        "🔹 User Commands (key required):\n"
+        "  /key – သင်၏ key ကို ထည့်သွင်းရန်\n"
+        "  /input <session_url> – Session URL ထည့်ရန်\n"
+        "  /scan – Code ရှာဖွေရန် (buttons ဖြင့်)\n"
+        "  /stop – လက်ရှိ scan ကို ရပ်တန့်ရန်\n"
+        "  /result – သင့်တွေ့ရှိထားသော success code များကို ကြည့်ရန်\n"
+        "  /recheck – သင့် success code များကို ပြန်လည်စစ်ဆေးရန်\n"
+        "  /mylimit – သင်၏ code limit ကို ကြည့်ရန်\n"
+        "  /proxyon – Proxy ဖွင့်ရန် (All users)\n"
+        "  /proxyoff – Proxy ပိတ်ရန် (All users)\n\n"
+        "🔹 Admin Commands:\n"
+        "  /genkey <plan> <user_id> <limit> – Key ထုတ်ပေးရန်\n"
+        "  /delkey <user_id> – Key ဖျက်ရန်\n"
+        "  /listkeys – Key စာရင်းကြည့်ရန်\n"
+        "  /status – Bot အခြေအနေကြည့်ရန်\n"
+        "  /broadcast <message> – User အားလုံးသို့ မက်ဆေ့ချ်ပို့ရန်\n"
+        "  /addproxy <url> – Proxy အသစ်ထည့်ရန်\n"
+        "  /clearproxy – Proxy အားလုံးဖျက်ရန်\n"
+        "  /proxystatus – Proxy အခြေအနေကြည့်ရန်\n\n"
+        "📌 Scan Types:\n"
+        "  6 – 6 digit numbers\n"
+        "  7 – 7 digit numbers\n"
+        "  8 – 8 digit numbers\n"
+        "  9 – 9 digit numbers\n"
+        "  all6 – Alphanumeric 6 chars\n"
+        "  all7 – Alphanumeric 7 chars\n"
+        "  all8 – Alphanumeric 8 chars\n"
+        "  all9 – Alphanumeric 9 chars"
     )
-    await bot.reply_to(message, help_text, parse_mode="Markdown")
+    await bot.reply_to(message, help_text)
 
 @bot.message_handler(commands=['mylimit'])
 async def mylimit(message):
@@ -589,13 +577,12 @@ async def mylimit(message):
             remaining_text = str(remaining)
         remaining_time = get_remaining_time(expires)
         await bot.reply_to(message,
-            f"📊 **Your Key Info**\n\n"
+            f"📊 Your Key Info\n\n"
             f"📋 Plan: {plan}\n"
             f"⏰ Remaining Time: {remaining_time}\n"
             f"🔢 Code Limit: {limit_text}\n"
             f"📊 Used: {used_count} codes\n"
-            f"✅ Remaining: {remaining_text} codes",
-            parse_mode="Markdown"
+            f"✅ Remaining: {remaining_text} codes"
         )
     elif chat_id == ADMIN_ID:
         await bot.reply_to(message, "♾️ You have Unlimited access (Admin)")
@@ -625,7 +612,7 @@ async def genkey(message):
                 if limit_num < 1:
                     raise ValueError
             except ValueError:
-                await bot.reply_to(message, "Invalid limit!\nLimit သည် ဂဏန်းဖြစ်ရပါမည် (ဥပမာ- 25, 100, 500) သို့မဟုတ် `unlimited`")
+                await bot.reply_to(message, "Invalid limit!\nLimit သည် ဂဏန်းဖြစ်ရပါမည် (ဥပမာ- 25, 100, 500) သို့မဟုတ် unlimited")
                 return
         await load_auth_list()
         auth_list[user_id] = {"expires_at": expiry, "plan": plan, "limit": limit}
@@ -793,7 +780,7 @@ async def handle_status(message):
         user_code_lines.append(f"  • {uid}: {count} codes")
 
     status_text = (
-        f"📊 **Bot Status**\n\n"
+        f"📊 Bot Status\n\n"
         f"⏱ Uptime: {hours}h {minutes}m {seconds}s\n"
         f"🔍 Active Scans: {active_scans}\n"
         f"👥 Scanning Users: {len(active_users)}\n"
@@ -804,21 +791,21 @@ async def handle_status(message):
     )
 
     if active_users:
-        status_text += f"\n\n🔑 **Active User IDs:**\n"
+        status_text += f"\n\n🔑 Active User IDs:\n"
         for uid in active_users:
             status_text += f"  • {uid}\n"
 
     if user_code_lines:
-        status_text += f"\n\n📊 **Codes Found Per User:**\n"
+        status_text += f"\n\n📊 Codes Found Per User:\n"
         status_text += "\n".join(user_code_lines)
 
     markup = types.InlineKeyboardMarkup(row_width=1)
     markup.add(types.InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu"))
 
     try:
-        await bot.reply_to(message, status_text, parse_mode="Markdown", reply_markup=markup)
+        await bot.reply_to(message, status_text, reply_markup=markup)
     except:
-        await bot.send_message(message.chat.id, status_text, parse_mode="Markdown", reply_markup=markup)
+        await bot.send_message(message.chat.id, status_text, reply_markup=markup)
 
 @bot.message_handler(commands=['result'])
 async def handle_result(message):
