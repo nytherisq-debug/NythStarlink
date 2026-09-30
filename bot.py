@@ -268,7 +268,7 @@ async def send_main_menu(message):
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"အောက်ပါ Menu မှ သင်လိုချင်တာကိုရွေးချယ်ပါ။"
     )
-    await bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown", reply_markup=markup)
+    await bot.send_message(message.chat.id, welcome_text, reply_markup=markup)
 
 async def send_admin_menu(message):
     markup = types.InlineKeyboardMarkup(row_width=1)
@@ -529,8 +529,7 @@ async def handle_key(message):
             f"👤 NAME: {user_name}\n"
             f"🆔 USER ID: {user_id}\n"
             f"📛 USERNAME: @{username}\n\n"
-            f"ကျေးဇူးပြု၍ Admin {ADMIN_CONTACT} ကို ဆက်သွယ်ပါ။",
-            parse_mode="Markdown"
+            f"ကျေးဇူးပြု၍ Admin {ADMIN_CONTACT} ကို ဆက်သွယ်ပါ။"
         )
 
 @bot.message_handler(commands=['help'])
@@ -939,10 +938,9 @@ async def handle_input(message):
             await bot.send_message(
                 message.chat.id,
                 "╔════════════════════╗\n"
-                "   ✅ **SESSION SAVED**\n"
+                "   ✅ SESSION SAVED\n"
                 "╚════════════════════╝\n\n"
                 "Choose a scan type below:",
-                parse_mode="Markdown",
                 reply_markup=markup
             )
         else:
@@ -994,9 +992,9 @@ async def trigger_scan(message, mode):
         "all9": "All Mix (9 - A-Z0-9)"
     }
     mode_display = mode_labels.get(mode, mode)
-    initial_text = f"🎯 **Scan Type:** {mode_display}\n━━━━━━━━━━━━━━━━━━━━━\n⏳ **Initializing Scan...**"
+    initial_text = f"🎯 Scan Type: {mode_display}\n━━━━━━━━━━━━━━━━━━━━━\n⏳ Initializing Scan..."
 
-    progress_msg = await bot.send_message(chat_id, initial_text, parse_mode="Markdown", reply_markup=markup)
+    progress_msg = await bot.send_message(chat_id, initial_text, reply_markup=markup)
     scan_id = str(uuid.uuid4())
     task = asyncio.create_task(
         run_bruteforce(
@@ -1024,16 +1022,15 @@ async def scan(message):
         )
         await bot.send_message(
             message.chat.id,
-            "🎯 **Choose Scan Type**\n\n"
-            "The buttons below replace the old `/scan 6`, `/scan 7`, `/scan 8` usage menu.",
-            parse_mode="Markdown",
+            "🎯 Choose Scan Type\n\n"
+            "The buttons below replace the old /scan 6, /scan 7, /scan 8 usage menu.",
             reply_markup=markup
         )
         return
     mode = args[1]
     valid_modes = {"6", "7", "8", "9", "all6", "all7", "all8", "all9"}
     if mode not in valid_modes:
-        await bot.reply_to(message, "Invalid mode!\n\nValid modes:\n`6` – 6 digit numbers\n`7` – 7 digit numbers\n`8` – 8 digit numbers\n`9` – 9 digit numbers\n`all6` – Alphanumeric 6 chars\n`all7` – Alphanumeric 7 chars\n`all8` – Alphanumeric 8 chars\n`all9` – Alphanumeric 9 chars", parse_mode="Markdown")
+        await bot.reply_to(message, "Invalid mode!\n\nValid modes:\n6 – 6 digit numbers\n7 – 7 digit numbers\n8 – 8 digit numbers\n9 – 9 digit numbers\nall6 – Alphanumeric 6 chars\nall7 – Alphanumeric 7 chars\nall8 – Alphanumeric 8 chars\nall9 – Alphanumeric 9 chars")
         return
     await trigger_scan(message, mode)
 
@@ -1121,7 +1118,7 @@ def format_progress(mode, checked, total, speed, found, retry, success_codes):
         filled = min(bar_length, int(percent / 5))
         bar = "█" * filled + "░" * (bar_length - filled)
         progress_text = (
-            f"🎯 **Scan Type:** {mode_display}\n"
+            f"🎯 Scan Type: {mode_display}\n"
             f"━━━━━━━━━━━━━━━━━━━━━\n"
             f"📦 Checked: {checked:,}/{total:,}\n"
             f"📊 Progress: {percent:.2f}%\n"
@@ -1133,7 +1130,7 @@ def format_progress(mode, checked, total, speed, found, retry, success_codes):
         )
     else:
         progress_text = (
-            f"🎯 **Scan Type:** {mode_display}\n"
+            f"🎯 Scan Type: {mode_display}\n"
             f"━━━━━━━━━━━━━━━━━━━━━\n"
             f"📦 Checked: {checked:,}\n"
             f"⚡ Speed: {speed_str}\n"
@@ -1145,14 +1142,14 @@ def format_progress(mode, checked, total, speed, found, retry, success_codes):
 
     if success_codes:
         codes_text = "\n━━━━━━━━━━━━━━━━━━━━━\n"
-        codes_text += "✅ **SUCCESS CODES**\n"
+        codes_text += "✅ SUCCESS CODES\n"
         codes_text += "─────────────────────\n"
         for idx, item in enumerate(success_codes, 1):
             if isinstance(item, dict):
-                codes_text += f"#{idx} 🔑 `{item['code']}`\n"
+                codes_text += f"#{idx} 🔑 {item['code']}\n"
                 codes_text += f"   📦 {item.get('plan', 'Unknown')}\n"
             else:
-                codes_text += f"#{idx} 🔑 `{item}`\n"
+                codes_text += f"#{idx} 🔑 {item}\n"
         progress_text += codes_text
 
     return progress_text
@@ -1242,10 +1239,10 @@ async def run_bruteforce(mode, chat_id, session_url, scan_id, message=None, prog
             )
 
             try:
-                await bot.edit_message_text(text, chat_id=chat_id, message_id=progress_msg.message_id, parse_mode="Markdown", reply_markup=markup)
+                await bot.edit_message_text(text, chat_id=chat_id, message_id=progress_msg.message_id, reply_markup=markup)
             except Exception:
                 try:
-                    new_msg = await bot.send_message(chat_id, text, parse_mode="Markdown", reply_markup=markup)
+                    new_msg = await bot.send_message(chat_id, text, reply_markup=markup)
                     progress_msg.message_id = new_msg.message_id
                 except Exception as err:
                     print(f"Progress Message Error: {err}")
@@ -1253,15 +1250,15 @@ async def run_bruteforce(mode, chat_id, session_url, scan_id, message=None, prog
         if progress_msg:
             success_codes = success_texts.get(chat_id, [])
             finish_text = format_progress(mode, checked, total, speed, found_count.get(chat_id, 0), retry_count.get(chat_id, 0), success_codes)
-            finish_text += "\n━━━━━━━━━━━━━━━━━━━━━\n✅ **SCAN COMPLETED!**"
+            finish_text += "\n━━━━━━━━━━━━━━━━━━━━━\n✅ SCAN COMPLETED!"
 
             markup = types.InlineKeyboardMarkup(row_width=1)
             markup.add(types.InlineKeyboardButton("🏠  Main Menu", callback_data="main_menu"))
             try:
-                await bot.edit_message_text(finish_text, chat_id=chat_id, message_id=progress_msg.message_id, parse_mode="Markdown", reply_markup=markup)
+                await bot.edit_message_text(finish_text, chat_id=chat_id, message_id=progress_msg.message_id, reply_markup=markup)
             except:
                 try:
-                    await bot.send_message(chat_id, finish_text, parse_mode="Markdown", reply_markup=markup)
+                    await bot.send_message(chat_id, finish_text, reply_markup=markup)
                 except Exception as err:
                     print(f"Progress Finish Message Error: {err}")
 
